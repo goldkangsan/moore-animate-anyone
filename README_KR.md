@@ -1,5 +1,7 @@
 # Moore-AnimateAnyone 구현 가이드
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/goldkangsan/moore-animate-anyone/blob/main/colab_animate_anyone.ipynb)
+
 ## 전체 실행 흐름
 
 ```
