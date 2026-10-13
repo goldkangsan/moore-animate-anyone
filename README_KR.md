@@ -1,174 +1,66 @@
-# Moore-AnimateAnyone 구현 가이드
+# Moore-AnimateAnyone 실행 안내
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/goldkangsan/moore-animate-anyone/blob/main/colab_animate_anyone.ipynb)
 
-## 전체 실행 흐름
+이 저장소는 [Moore-AnimateAnyone](https://github.com/MooreThreads/Moore-AnimateAnyone)의 추론 스크립트와 설정을 담고 있습니다. 원본 `src/` 코드와 모델 가중치는 포함하지 않습니다. NVIDIA CUDA 환경을 권장합니다. 전체 실행은 이 저장소에서 검증된 것으로 표시하지 않습니다.
 
-```
-[사람 이미지 1장]  +  [동작 비디오]
-       ↓                    ↓
-  prepare_inputs.py    vid2pose.py (포즈 추출)
-       ↓                    ↓
-            pose2vid.py (inference)
-                   ↓
-           output/*.mp4 (결과 영상)
-```
+## 설치
 
----
-
-## 사전 준비
-
-### 1. 레포 클론 (원본 Moore-AnimateAnyone)
 ```bash
-git clone https://github.com/MooreThreads/Moore-AnimateAnyone
-cd Moore-AnimateAnyone
-```
+git clone https://github.com/goldkangsan/moore-animate-anyone.git
+cd moore-animate-anyone
+mkdir -p upstream
+git clone https://github.com/MooreThreads/Moore-AnimateAnyone.git upstream/Moore-AnimateAnyone
+ln -s upstream/Moore-AnimateAnyone/src src
 
-> **주의**: 이 폴더의 스크립트는 Moore-AnimateAnyone 레포 루트에서 실행해야 한다.
-> `src/`, `configs/` 등이 원본 레포에 있다.
-
-### 2. 환경 설치
-```bash
-# Python 3.10+, CUDA 11.7+ 권장
 conda create -n animate python=3.10 -y
 conda activate animate
-pip install -r requirements.txt
+pip install -r upstream/Moore-AnimateAnyone/requirements.txt
 ```
 
-### 3. Weights 다운로드
+`tools/vid2pose.py`와 `scripts/pose2vid.py`가 저장소 루트의 `src/`를 import하므로 심볼릭 링크가 필요합니다. 원본 저장소의 의존성 설치 방법이 바뀌었다면 [원본 README](https://github.com/MooreThreads/Moore-AnimateAnyone)를 먼저 확인하세요.
+
+## 입력과 가중치
+
 ```bash
+mkdir -p inputs
+cp /path/to/driving.mp4 inputs/driving.mp4
+python tools/prepare_inputs.py --ref /path/to/character.jpg --video inputs/driving.mp4 -W 512 -H 784
 python tools/download_weights.py
-```
-
-다운받는 파일들:
-```
-pretrained_weights/
-├── stable-diffusion-v1-5/unet/
-├── image_encoder/
-├── sd-vae-ft-mse/
-├── DWPose/
-│   ├── dw-ll_ucoco_384.onnx
-│   └── yolox_l.onnx
-├── denoising_unet.pth
-├── reference_unet.pth
-├── pose_guider.pth
-└── motion_module.pth
-```
-
----
-
-## 실행 순서
-
-### Step 0: 환경 체크 (먼저 해라)
-```bash
 python tools/check_env.py
 ```
 
-### Step 1: 입력 파일 전처리
+`prepare_inputs.py`는 참조 이미지를 `inputs/ref.png`에 저장하지만 driving video는 복사하지 않습니다. `run.sh`는 `inputs/ref.png`와 `inputs/driving.mp4`가 이미 있다고 가정합니다. 가중치는 `pretrained_weights/`에 내려받습니다. 다운로드에 접근 권한이 필요한 모델은 배포처의 절차를 따라야 합니다.
+
+## 실행
+
+한 번에 실행하려면:
+
 ```bash
-# ref.png를 512x784로 리사이즈해서 inputs/ref.png로 저장
-python tools/prepare_inputs.py \
-  --ref path/to/your_photo.jpg \
-  --video path/to/driving.mp4 \
-  -W 512 -H 784
+bash run.sh
+# 메모리 부족 시: bash run.sh --low_vram
+# 프레임 수 변경: bash run.sh --frames 64
 ```
 
-### Step 2: 포즈 추출
+단계별로 실행하려면:
+
 ```bash
-python tools/vid2pose.py --video_path inputs/driving.mp4
-# → outputs/pose/driving_kps.mp4 생성
+python tools/vid2pose.py --video_path inputs/driving.mp4 --output_path outputs/pose/driving_kps.mp4
 ```
 
-### Step 3: animation.yaml 수정
-`configs/prompts/animation.yaml`:
-```yaml
-test_cases:
-  "./inputs/ref.png":
-    - "./outputs/pose/driving_kps.mp4"
-```
+`configs/prompts/animation.yaml`의 `test_cases`가 `./inputs/ref.png`와 `./outputs/pose/driving_kps.mp4`를 가리키는지 확인한 뒤:
 
-### Step 4: Inference 실행
 ```bash
-# 기본 (512x784, 32프레임)
-python scripts/pose2vid.py \
-  --config ./configs/prompts/animation.yaml \
-  -W 512 -H 784 -L 32
-
-# VRAM 부족할 때 (해상도/프레임 낮추기)
-python scripts/pose2vid.py \
-  --config ./configs/prompts/animation.yaml \
-  -W 384 -H 512 -L 16
+python scripts/pose2vid.py --config ./configs/prompts/animation.yaml -W 512 -H 784 -L 32
 ```
 
-### (선택) Gradio UI로 실행
-```bash
-python run_gradio.py
-# → http://localhost:7860
-```
+포즈 영상은 `outputs/pose/`에, 최종 생성 영상은 `output/` 아래의 날짜별 폴더에 저장됩니다. 브라우저 UI는 `python run_gradio.py`로 시작합니다.
 
-### 한 번에 전부 실행
-```bash
-bash run.sh                  # 기본 설정
-bash run.sh --low_vram       # VRAM 부족 시
-bash run.sh --frames 64      # 더 긴 영상
-```
+## 자주 확인할 점
 
----
+- CUDA 메모리가 부족하면 `-L`, `-W`, `-H`를 줄입니다.
+- `src` import 오류가 나면 위 심볼릭 링크와 원본 저장소의 파일 구성을 확인합니다.
+- ONNX 오류가 나면 설치된 `onnxruntime` 또는 `onnxruntime-gpu`가 환경에 맞는지 확인합니다.
+- `pretrained_weights/` 누락은 `python tools/check_env.py`로 확인합니다.
 
-## VRAM 가이드
-
-| 설정 | 최소 VRAM |
-|------|-----------|
-| 384x512, 16프레임 | ~8GB |
-| 512x784, 32프레임 | ~12GB |
-| 512x784, 64프레임 | ~16GB+ |
-
----
-
-## 자주 막히는 포인트
-
-### onnxruntime 오류
-```bash
-pip install onnxruntime-gpu==1.16.3
-# GPU 없으면:
-pip install onnxruntime==1.16.3
-```
-
-### CUDA out of memory
-- `-L` (프레임 수) 줄이기
-- `-W`, `-H` 해상도 줄이기
-- `weight_dtype: fp16` 확인
-
-### weights 경로 오류
-- `pretrained_weights/` 폴더 구조가 README 기준과 정확히 맞아야 함
-- `python tools/check_env.py` 로 확인
-
-### pose 추출이 안 될 때
-- DWPose onnx 파일 확인: `pretrained_weights/DWPose/*.onnx`
-- 비디오 codec 문제: mp4 (H.264) 형식 사용 권장
-
----
-
-## 파일 구조
-
-```
-animate_anyone/
-├── scripts/
-│   └── pose2vid.py          # 메인 inference 스크립트
-├── tools/
-│   ├── download_weights.py  # weights 다운로드
-│   ├── vid2pose.py          # 포즈 추출
-│   ├── prepare_inputs.py    # 입력 전처리
-│   └── check_env.py         # 환경 체크
-├── configs/
-│   ├── prompts/
-│   │   └── animation.yaml   # 입력/출력 경로 설정
-│   └── inference/
-│       └── inference_v2.yaml # UNet/scheduler 설정
-├── inputs/                  # ref image 저장 위치
-├── outputs/
-│   └── pose/                # vid2pose 출력 위치
-├── pretrained_weights/      # 모델 weights
-├── run.sh                   # 원클릭 실행 스크립트
-└── run_gradio.py            # Gradio UI
-```
+원본 코드 및 가중치의 라이선스는 이 저장소의 문서와 별개입니다. 각 배포처의 조건을 확인하세요.
